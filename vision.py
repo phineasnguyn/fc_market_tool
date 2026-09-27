@@ -15,17 +15,17 @@ from PIL import Image
 
 REFERENCE_SIZE = (1920, 1080)
 MARKET_CROP = (240, 48, 1680, 995)
-BUY_NAME = (791, 276, 993, 314)
+BUY_NAME = (800, 260, 1050, 320)
 BUY_PRICE_TABLE = (750, 320, 1070, 560)
-BUY_MAX_PRICE = (1430, 426, 1547, 465)
-DIALOG_MIN_PRICE = (1430, 385, 1547, 424)
-BUY_REGISTERED_PRICE = (1480, 580, 1555, 608)
+BUY_MAX_PRICE = (1380, 400, 1605, 475)
+DIALOG_MIN_PRICE = (1380, 360, 1605, 430)
+BUY_REGISTERED_PRICE = (1380, 550, 1605, 630)
 
-SELL_NAME = (750, 330, 960, 375)
+SELL_NAME = (790, 315, 1000, 375)
 SELL_PRICE_TABLE = (750, 415, 1070, 750)
-SELL_MIN_PRICE = (1420, 455, 1580, 497)
-SELL_MAX_PRICE = (1420, 498, 1580, 540)
-SELL_REGISTERED_PRICE = (1280, 635, 1600, 725)
+SELL_MIN_PRICE = (1370, 420, 1610, 485)
+SELL_MAX_PRICE = (1370, 465, 1610, 535)
+SELL_REGISTERED_PRICE = (1200, 600, 1610, 730)
 
 LIST_NAME = (440, 245, 642, 298)
 LIST_REGISTERED_PRICE = (1172, 250, 1284, 300)
@@ -57,7 +57,15 @@ def parse_price(text: str) -> int | None:
     cleaned_spaces = text.replace(" ", "")
     match = PRICE_RE.search(cleaned_spaces)
     if match:
-        number = float(match.group(1).replace(",", ""))
+        raw_number = match.group(1)
+        if "," in raw_number and "." not in raw_number:
+            parts = raw_number.split(",")
+            # OCR hoặc locale có thể dùng dấu phẩy cho phần thập phân (1,03B).
+            # FC Online dùng nhóm 3 chữ số cho giá lớn (615,000B).
+            normalized_number = ".".join(parts) if len(parts) == 2 and len(parts[1]) <= 2 else "".join(parts)
+        else:
+            normalized_number = raw_number.replace(",", "")
+        number = float(normalized_number)
         unit = match.group(2).upper()
         multiplier = {"M": 1_000_000, "B": 1_000_000_000, "T": 1_000_000_000_000}[unit]
         return round(number * multiplier)
@@ -131,24 +139,57 @@ def crop_market(image: Image.Image) -> Image.Image:
 
 def state_from_pixels(image: Image.Image, row_index: int = 1) -> str:
     image = normalized(image).convert("RGB")
-    r, g, b = image.getpixel((600, 400))
-    if min(r, g, b) >= 210:
-        # Phân biệt hộp Mua vs hộp Bán qua màu nút thao tác chính
-        orange, blue = 0, 0
-        for x in range(1150, 1300, 10):
-            for y in range(840, 920, 8):
-                pr, pg, pb = image.getpixel((x, y))
-                if pr > 180 and pb < 80:
-                    orange += 1
-                elif pb > 180 and pr < 130:
-                    blue += 1
-        if blue > orange:
-            return "sell_dialog"
-        return "buy_dialog"
+    # Các điểm này nằm trên nền hộp thoại, tránh vùng ảnh thẻ cầu thủ.
+    dialog_points = ((1100, 200), (1100, 700), (600, 750), (1550, 700), (1000, 700))
+    bright_points = sum(1 for point in dialog_points if min(image.getpixel(point)) >= 215)
+    if bright_points >= 4:
+        buttons = dialog_button_centers(image)
+        if buttons is not None:
+            return buttons[0]
+        return "unknown"
+
+    # Màn hình DS có bảng trung tâm tối. Chấp nhận cả giao diện xám cũ và tím mới.
+    list_points = ((500, 350), (960, 350), (1350, 350), (960, 650), (1500, 650))
+    dark_points = sum(1 for point in list_points if max(image.getpixel(point)) <= 190)
     header = image.getpixel((960, 75))
-    if max(r, g, b) <= 80 and 40 <= max(header) <= 130:
+    if dark_points >= 4 and 30 <= max(header) <= 210:
         return "my_list"
     return "unknown"
+
+
+def dialog_button_centers(
+    image: Image.Image,
+    expected_state: str | None = None,
+) -> tuple[str, tuple[int, int], tuple[int, int]] | None:
+    """Find action/cancel buttons so vertical UI shifts do not break clicks."""
+    image = normalized(image).convert("RGB")
+    orange: list[tuple[int, int]] = []
+    blue: list[tuple[int, int]] = []
+    for x in range(1080, 1401, 4):
+        for y in range(780, 941, 4):
+            r, g, b = image.getpixel((x, y))
+            if r > 180 and 30 < g < 170 and b < 120:
+                orange.append((x, y))
+            elif b > 160 and g > 80 and r < 130:
+                blue.append((x, y))
+
+    candidates: list[tuple[str, list[tuple[int, int]], int]] = [
+        ("buy_dialog", orange, 210),
+        ("sell_dialog", blue, 205),
+    ]
+    if expected_state:
+        candidates.sort(key=lambda item: item[0] != expected_state)
+    for state, pixels, cancel_offset in candidates:
+        if len(pixels) < 30:
+            continue
+        left = min(x for x, _ in pixels)
+        right = max(x for x, _ in pixels)
+        top = min(y for _, y in pixels)
+        bottom = max(y for _, y in pixels)
+        action = ((left + right) // 2, (top + bottom) // 2)
+        cancel = (action[0] + cancel_offset, action[1])
+        return state, action, cancel
+    return None
 
 
 def renew_button_visible(image: Image.Image, row_index: int = 1) -> bool:
@@ -234,10 +275,10 @@ def analyze(image: Image.Image, tesseract: Path, row_index: int = 1) -> MarketVi
     state = state_from_pixels(image, row_index)
     if state == "buy_dialog":
         name = first_line(ocr_region(image, BUY_NAME, tesseract))
+        rows = parse_rows(ocr_region(image, BUY_PRICE_TABLE, tesseract))
         min_price = parse_price(ocr_region(image, DIALOG_MIN_PRICE, tesseract))
         max_price = parse_price(ocr_region(image, BUY_MAX_PRICE, tesseract))
         registered_price = parse_price(ocr_region(image, BUY_REGISTERED_PRICE, tesseract))
-        rows = parse_rows(ocr_region(image, BUY_PRICE_TABLE, tesseract))
         buyers = next((row.buyers for row in rows if row.price_bp == max_price and row.buyers > 0), None)
         sellers_min = next((row.sellers for row in rows if row.price_bp == min_price and row.sellers > 0), None)
         sellers_max = next((row.sellers for row in rows if row.price_bp == max_price and row.sellers > 0), None)
@@ -254,10 +295,10 @@ def analyze(image: Image.Image, tesseract: Path, row_index: int = 1) -> MarketVi
         )
     if state == "sell_dialog":
         name = first_line(ocr_region(image, SELL_NAME, tesseract))
+        rows = parse_rows(ocr_region(image, SELL_PRICE_TABLE, tesseract))
         min_price = parse_price(ocr_region(image, SELL_MIN_PRICE, tesseract))
         max_price = parse_price(ocr_region(image, SELL_MAX_PRICE, tesseract))
         registered_price = parse_price(ocr_region(image, SELL_REGISTERED_PRICE, tesseract))
-        rows = parse_rows(ocr_region(image, SELL_PRICE_TABLE, tesseract))
         buyers = next((row.buyers for row in rows if row.price_bp == max_price and row.buyers > 0), None)
         sellers_min = next((row.sellers for row in rows if row.price_bp == min_price and row.sellers > 0), None)
         sellers_max = next((row.sellers for row in rows if row.price_bp == max_price and row.sellers > 0), None)
