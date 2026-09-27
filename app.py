@@ -29,9 +29,6 @@ def find_tesseract_exe() -> Path:
     env_path = os.environ.get("TESSERACT_PATH")
     if env_path and Path(env_path).exists():
         return Path(env_path)
-    which_path = shutil.which("tesseract")
-    if which_path and Path(which_path).exists():
-        return Path(which_path)
     for candidate in (
         APP_DIR / "Tesseract-OCR" / "tesseract.exe",
         APP_DIR / "tesseract" / "tesseract.exe",
@@ -41,6 +38,9 @@ def find_tesseract_exe() -> Path:
     ):
         if candidate.exists():
             return candidate
+    which_path = shutil.which("tesseract")
+    if which_path and Path(which_path).exists():
+        return Path(which_path)
     return Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
 
 
@@ -73,7 +73,7 @@ class App:
         self.repeats = tk.StringVar(value="1")
         self.pause = tk.StringVar(value="500")
         self.dry_run = tk.BooleanVar(value=True)
-        self.background_mode = tk.BooleanVar(value=True)
+        self.background_mode = tk.BooleanVar(value=False)
         self.player_name = tk.StringVar()
         self.mode_display = tk.StringVar(value=MODE_DISPLAY["BUY"])
         self.row_index = tk.StringVar(value="1")
@@ -118,14 +118,16 @@ class App:
         form.columnconfigure(1, weight=1)
         ttk.Label(form, text="Chế độ hoạt động").grid(row=0, column=0, sticky="w", pady=6)
         ttk.Combobox(form, textvariable=self.mode_display, values=tuple(MODE_DISPLAY.values()), width=24, state="readonly").grid(row=0, column=1, sticky="w", padx=10, pady=6)
-        ttk.Label(form, text="Hàng trong DS của bạn").grid(row=1, column=0, sticky="w", pady=6)
-        ttk.Combobox(form, textvariable=self.row_index, values=("1", "2", "3", "4", "5"), width=6, state="readonly").grid(row=1, column=1, sticky="w", padx=10, pady=6)
-        ttk.Label(form, text="Số lệnh xếp hàng phía trước tối đa (để dừng)").grid(row=2, column=0, sticky="w", pady=6)
-        ttk.Combobox(form, textvariable=self.max_buyers_ahead, values=("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"), width=6, state="readonly").grid(row=2, column=1, sticky="w", padx=10, pady=6)
-        ttk.Label(form, text="Nghỉ giữa các lần (ms)").grid(row=3, column=0, sticky="w", pady=6)
-        ttk.Entry(form, textvariable=self.retry_ms, width=10).grid(row=3, column=1, sticky="w", padx=10, pady=6)
-        ttk.Label(form, text="Số lần kiểm tra tối đa").grid(row=4, column=0, sticky="w", pady=6)
-        ttk.Entry(form, textvariable=self.max_cycles, width=10).grid(row=4, column=1, sticky="w", padx=10, pady=6)
+        ttk.Label(form, text="Tên cầu thủ (khuyên dùng để chống nhầm hàng)").grid(row=1, column=0, sticky="w", pady=6)
+        ttk.Entry(form, textvariable=self.player_name).grid(row=1, column=1, sticky="ew", padx=10, pady=6)
+        ttk.Label(form, text="Hàng trong DS của bạn").grid(row=2, column=0, sticky="w", pady=6)
+        ttk.Combobox(form, textvariable=self.row_index, values=("1", "2", "3", "4", "5"), width=6, state="readonly").grid(row=2, column=1, sticky="w", padx=10, pady=6)
+        ttk.Label(form, text="Số lệnh xếp hàng phía trước tối đa (để dừng)").grid(row=3, column=0, sticky="w", pady=6)
+        ttk.Combobox(form, textvariable=self.max_buyers_ahead, values=("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"), width=6, state="readonly").grid(row=3, column=1, sticky="w", padx=10, pady=6)
+        ttk.Label(form, text="Nghỉ giữa các lần (ms)").grid(row=4, column=0, sticky="w", pady=6)
+        ttk.Entry(form, textvariable=self.retry_ms, width=10).grid(row=4, column=1, sticky="w", padx=10, pady=6)
+        ttk.Label(form, text="Số lần kiểm tra tối đa").grid(row=5, column=0, sticky="w", pady=6)
+        ttk.Entry(form, textvariable=self.max_cycles, width=10).grid(row=5, column=1, sticky="w", padx=10, pady=6)
 
         market_actions = ttk.Frame(market)
         market_actions.pack(fill="x", pady=16)
@@ -279,6 +281,7 @@ class App:
         try:
             mode = MODE_FROM_DISPLAY.get(self.mode_display.get(), "BUY")
             target = OrderTarget(
+                player_name=self.player_name.get().strip(),
                 row_index=int(self.row_index.get()),
                 max_buyers_ahead=int(self.max_buyers_ahead.get()),
                 retry_ms=int(self.retry_ms.get()),
@@ -450,7 +453,7 @@ class App:
             self.repeats.set(str(payload.get("repeats", "1")))
             self.pause.set(str(payload.get("pause", "500")))
             self.dry_run.set(bool(payload.get("dry_run", True)))
-            self.background_mode.set(bool(payload.get("background_mode", True)))
+            self.background_mode.set(bool(payload.get("background_mode", False)))
             self.player_name.set(str(payload.get("player_name", "")))
             self.row_index.set(str(payload.get("row_index", "1")))
             self.max_buyers_ahead.set(str(payload.get("max_buyers_ahead", "4")))
