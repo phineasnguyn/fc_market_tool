@@ -33,6 +33,8 @@ def find_tesseract_exe() -> Path:
     if which_path and Path(which_path).exists():
         return Path(which_path)
     for candidate in (
+        APP_DIR / "Tesseract-OCR" / "tesseract.exe",
+        APP_DIR / "tesseract" / "tesseract.exe",
         Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
         Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
         Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Tesseract-OCR" / "tesseract.exe",
