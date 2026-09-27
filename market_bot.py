@@ -6,12 +6,13 @@ import re
 import time
 import unicodedata
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from threading import Event
 from typing import Callable, Protocol
 
 from PIL import Image
 
-from vision import FastOcr, MarketView, analyze, renew_button_visible, state_from_pixels
+from vision import FastOcr, MarketView, analyze, dialog_button_centers, renew_button_visible, state_from_pixels
 
 
 RENEW_X, RENEW_Y = 1487, 273
@@ -64,7 +65,7 @@ def clean_name(name: str) -> str:
 
 def same_player(found: str, target: str) -> bool:
     a, b = clean_name(found), clean_name(target)
-    return bool(a and b and (a == b or a in b or b in a))
+    return bool(a and b and (a == b or a in b or b in a or SequenceMatcher(None, a, b).ratio() >= 0.88))
 
 
 def ready_to_buy(view: MarketView, limit: int) -> bool:
@@ -88,11 +89,11 @@ def ready_to_complete(view: MarketView, target: OrderTarget) -> bool:
     if target.mode == "SELL_MIN":
         if view.min_price_bp is None or view.registered_price_bp != view.min_price_bp:
             return False
-        return view.sellers_at_min is None or view.sellers_at_min <= limit
+        return view.sellers_at_min is not None and view.sellers_at_min <= limit
     elif target.mode == "SELL_MAX":
         if view.max_price_bp is None or view.registered_price_bp != view.max_price_bp:
             return False
-        return view.sellers_at_max is None or view.sellers_at_max <= limit
+        return view.sellers_at_max is not None and view.sellers_at_max <= limit
     else:  # "BUY"
         return ready_to_buy(view, limit)
 
@@ -141,9 +142,13 @@ def run_market_bot(
         raise ValueError("Giới hạn lệnh phía trước phải từ 0 đến 100.")
     if not 0 <= target.retry_ms <= 60000 or not 1 <= target.max_cycles <= 10000:
         raise ValueError("Thời gian thử lại hoặc số lượt kiểm tra không hợp lệ.")
+    if target.mode not in ("BUY", "SELL_MIN", "SELL_MAX"):
+        raise ValueError("Chế độ phải là BUY, SELL_MIN hoặc SELL_MAX.")
 
     consecutive_errors = 0
     max_errors = max(1, target.max_consecutive_errors)
+    expected_dialog_state = "buy_dialog" if target.mode == "BUY" else "sell_dialog"
+    observed_player_name = ""
 
     for cycle in range(1, target.max_cycles + 1):
         if stop.is_set():
@@ -175,6 +180,16 @@ def run_market_bot(
                     report("Đã dừng theo yêu cầu.")
                     return
                 continue
+
+            if target.player_name:
+                if not view.player_name:
+                    report("Đã dừng: OCR không đọc được tên cầu thủ ở hàng đã chọn.")
+                    return
+                if not same_player(view.player_name, target.player_name):
+                    report(f"Đã dừng: hàng {target.row_index} là '{view.player_name}', cần '{target.player_name}'.")
+                    return
+            elif view.player_name:
+                observed_player_name = view.player_name
 
             name_info = f"{view.player_name}, " if view.player_name else ""
             report(f"Lượt {cycle}: {name_info}giá đang đăng ký {view.registered_price_bp} BP.")
@@ -218,6 +233,14 @@ def run_market_bot(
                 return
             continue
 
+        dialog_state = state_from_pixels(image, target.row_index)
+        if dialog_state != expected_dialog_state:
+            report(
+                f"Đã dừng: chế độ {target.mode} cần hộp "
+                f"{'Mua' if expected_dialog_state == 'buy_dialog' else 'Bán'}, nhưng màn hình hiện tại không khớp."
+            )
+            return
+
         # Đang ở hộp thoại Mua/Bán cầu thủ
         deadline = time.monotonic() + target.read_timeout_sec
         view = analyze(image, ocr, target.row_index)
@@ -243,12 +266,25 @@ def run_market_bot(
             image = desktop.screenshot()
             view = analyze(image, ocr, target.row_index)
 
+        expected_player = target.player_name or observed_player_name
+        if expected_player:
+            if not view.player_name:
+                report("Đã dừng: OCR không đọc được tên cầu thủ trong hộp thao tác.")
+                return
+            if not same_player(view.player_name, expected_player):
+                report(f"Đã dừng: hộp thao tác là '{view.player_name}', cần '{expected_player}'.")
+                return
+
+        buttons = dialog_button_centers(image, expected_dialog_state)
+        if buttons is None or buttons[0] != expected_dialog_state:
+            report("Đã dừng: không định vị chắc chắn được nút thao tác và nút Hủy.")
+            return
+        _, (action_btn_x, action_btn_y), (cancel_btn_x, cancel_btn_y) = buttons
+
         if target.mode == "SELL_MIN":
             target_price = view.min_price_bp
             target_x = target.min_price_click_x if target.min_price_click_x != MIN_PRICE_ROW_X else SELL_MIN_PRICE_ROW_X
             target_y = target.min_price_click_y if target.min_price_click_y != MIN_PRICE_ROW_Y else SELL_MIN_PRICE_ROW_Y
-            action_btn_x, action_btn_y = SELL_ACTION_X, SELL_ACTION_Y
-            cancel_btn_x, cancel_btn_y = SELL_CANCEL_X, SELL_CANCEL_Y
             queue_count = view.sellers_at_min
             action_name = "Bán cầu thủ"
             price_name = "giá sàn"
@@ -257,8 +293,6 @@ def run_market_bot(
             target_price = view.max_price_bp
             target_x = target.max_price_click_x if target.max_price_click_x != MAX_PRICE_ROW_X else SELL_MAX_PRICE_ROW_X
             target_y = target.max_price_click_y if target.max_price_click_y != MAX_PRICE_ROW_Y else SELL_MAX_PRICE_ROW_Y
-            action_btn_x, action_btn_y = SELL_ACTION_X, SELL_ACTION_Y
-            cancel_btn_x, cancel_btn_y = SELL_CANCEL_X, SELL_CANCEL_Y
             queue_count = view.sellers_at_max
             action_name = "Bán cầu thủ"
             price_name = "giá trần"
@@ -266,8 +300,6 @@ def run_market_bot(
         else:
             target_price = view.max_price_bp
             target_x, target_y = target.max_price_click_x, target.max_price_click_y
-            action_btn_x, action_btn_y = BUY_ACTION_X, BUY_ACTION_Y
-            cancel_btn_x, cancel_btn_y = BUY_CANCEL_X, BUY_CANCEL_Y
             queue_count = view.buyers_at_max
             action_name = "Mua cầu thủ"
             price_name = "giá tối đa"
@@ -291,6 +323,24 @@ def run_market_bot(
                 return
             continue
 
+        if queue_count is None:
+            consecutive_errors += 1
+            if consecutive_errors >= max_errors:
+                report(f"Đã dừng: OCR không đọc được {queue_name}; không bấm lệnh khi dữ liệu chưa chắc chắn.")
+                return
+            report(
+                f"Chưa đọc được {queue_name} (lần {consecutive_errors}/{max_errors}); "
+                "bấm Hủy và đọc lại, chưa đặt lệnh."
+            )
+            desktop.click_ref(cancel_btn_x, cancel_btn_y)
+            if wait_for_state(desktop, "my_list", target.row_index, stop, timeout=2.0) is None:
+                report("Đã dừng: bấm Hủy nhưng không trở về DS của bạn.")
+                return
+            if stop.wait(0.5):
+                report("Đã dừng theo yêu cầu.")
+                return
+            continue
+
         # Thành công đọc giá: reset bộ đếm lỗi liên tiếp
         consecutive_errors = 0
 
@@ -301,7 +351,9 @@ def run_market_bot(
             desktop.click_ref(cancel_btn_x, cancel_btn_y)
             if wait_for_state(desktop, "my_list", target.row_index, stop, timeout=2.0) is None:
                 desktop.click_ref(cancel_btn_x, cancel_btn_y)
-                stop.wait(0.5)
+                if wait_for_state(desktop, "my_list", target.row_index, stop, timeout=1.0) is None:
+                    report("Đã dừng: điều kiện đạt nhưng không xác nhận được hộp thao tác đã đóng.")
+                    return
             report(f"Hoàn thành: giá đăng ký bằng {price_name} và số lệnh không quá giới hạn; đã bấm Hủy và dừng.")
             return
 
@@ -327,3 +379,5 @@ def run_market_bot(
         if stop.wait(target.retry_ms / 1000.0):
             report("Đã dừng theo yêu cầu.")
             return
+
+    report("Đã dừng: đạt số lượt kiểm tra tối đa.")

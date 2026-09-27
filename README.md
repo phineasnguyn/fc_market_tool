@@ -12,12 +12,13 @@
   - **Chèn bán (Giá trần):** Tự động bắt giá tối đa khi cần chèn vị trí bán đầu tiên.
   - **Cơ chế kiểm soát hàng đợi:** Dừng hoặc hủy khi số lệnh đặt trước $\le$ mức cài đặt (giành vị trí ưu tiên đầu hàng). Tự động đặt lệnh tiếp khi thị trường vừa reset giá.
   - **Tự động thử lại (Retry):** Bền bỉ vượt qua lag, nghẽn mạng hoặc độ trễ tải dữ liệu từ game.
-- **Chế độ Chạy Nền (Không chiếm chuột):**
-  - Chụp ảnh cửa sổ game và gửi tín hiệu click qua Win32 API (`PostMessage`), cho phép vừa treo máy vừa làm việc khác trên máy tính.
+- **Chế độ Chạy Nền (thử nghiệm, không chiếm chuột):**
+  - Chụp riêng cửa sổ game và gửi tín hiệu click qua Win32 API (`PostMessage`). Chế độ này mặc định tắt vì vẫn cần kiểm tra trực tiếp xem FC Online có nhận input nền trên từng máy hay không.
 - **Auto-Click Chuỗi Phím Thủ Công:**
   - Hỗ trợ lưu danh sách tọa độ tùy ý (F6) và phát lại vòng lặp (F8).
 - **Hỗ trợ Đa Độ Phân Giải (Chuẩn hóa 16:9):**
   - Tự động crop vùng game và quy đổi về tọa độ gốc 1920 × 1080.
+  - Tự tìm vị trí nút Mua/Bán/Hủy theo màu để chịu được thay đổi vị trí theo chiều dọc giữa các giao diện.
 
 ---
 
@@ -71,11 +72,14 @@ File thực thi độc lập sẽ được tạo tại `dist/FCMarketClicker.exe
 2. Mở ứng dụng, nhấn **F7** (hoặc bấm nút **Tìm FC Online**) để tự động nhận diện cửa sổ game.
 3. Cài đặt các thông số:
    - **Chế độ hoạt động:** `Chèn mua (Giá trần)`, `Chèn bán (Giá sàn)`, hoặc `Chèn bán (Giá trần)`.
+    - **Tên cầu thủ:** Nên nhập để bot đối chiếu tên trên hàng và trong hộp thao tác, tránh bấm nhầm khi danh sách đổi thứ tự.
    - **Vị trí hàng:** Thứ tự cầu thủ trong DS của bạn (từ 1 đến 5).
    - **Số lệnh xếp hàng phía trước tối đa:** Ngưỡng mốc để dừng/hoàn thành.
 4. Bật chế độ **Mô phỏng** và nhấn **Kiểm tra màn hình game** để xác nhận OCR nhận diện chính xác giá và hàng đợi.
 5. Bỏ chọn **Mô phỏng**, nhấn **Lưu cấu hình**.
 6. Nhấn **F11** (hoặc nút **Bắt đầu chạy**) để tiến hành tự động. Nhấn **F9** để dừng khẩn cấp bất kỳ lúc nào.
+
+Bot chỉ bấm đặt lệnh khi đọc được đầy đủ giá đăng ký, giá mục tiêu và số lượng hàng đợi. Nếu loại hộp Mua/Bán không khớp chế độ, tên cầu thủ không khớp hoặc OCR thiếu số lượng, bot đóng hộp/thử lại hoặc dừng thay vì bấm tiếp.
 
 ### 2. Phím Tắt Tiện Ích
 
@@ -111,4 +115,5 @@ fc_market_tool/
 ## ⚠️ Lưu Ý & Miễn Trừ Trách Nhiệm
 
 - Ứng dụng chỉ tương tác qua việc đọc hình ảnh màn hình và gửi tín hiệu chuột, **không can thiệp vào bộ nhớ hay mã nguồn của game**.
+- Chế độ chạy nền phụ thuộc việc game có chấp nhận thông điệp chuột Windows. Hãy kiểm tra bằng chế độ mô phỏng và quan sát nhật ký trước khi chạy thật.
 - Công cụ được phát triển phục vụ mục đích học tập, nghiên cứu tự động hóa giao diện trên hệ điều hành Windows. Người dùng tự chịu trách nhiệm về mục đích sử dụng.
