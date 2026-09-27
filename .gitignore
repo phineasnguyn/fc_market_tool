@@ -1,0 +1,49 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging / PyInstaller build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+*.manifest
+
+# Redundant spec files
+*-v[0-9]*.spec
+*-restored.spec
+
+# Local runtime & user configs
+settings.json
+*.log
+
+# Debug & scratch crops
+debug-*.png
+scratch_*.png
+max_p.png
+reg_p.png
+sample_dialog.png
+sell_normalized_1080.png
+table.png
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE & OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+Thumbs.db
+Desktop.ini
+.DS_Store
